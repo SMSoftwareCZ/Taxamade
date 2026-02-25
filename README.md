@@ -24,3 +24,7 @@ a přípravu výstupů pro další zpracování (např. účetnictví, reporting
 
 ```bash
 python taxamade.py
+
+Preconditions:
+- Pandas, XlsxWriter
+" python -m pip install XlsxWriter "
