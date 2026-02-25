@@ -24,8 +24,10 @@ a přípravu výstupů pro další zpracování (např. účetnictví, reporting
 
 ```bash
 pip install pandas numpy xlsxwriter
+```
 
 4. Spusťte skript:
 
 ```bash
 python taxamade.py
+```
