@@ -1,6 +1,6 @@
 
 """ TAXAMADE"""
-#import re
+import os
 import numpy as np
 import pandas as pd
 #import matplotlib.pyplot as plt
@@ -17,11 +17,11 @@ print("----TAXAMADE----")
 found = False       # pylint: disable=invalid-name
 kurz_USD = 21.84    # pylint: disable=invalid-name
 kurz_EUR = 24.66    # pylint: disable=invalid-name
-print("Jednotný kurz: USD , EUR",kurz_USD,kurz_EUR)
+print(f"Jednotný kurz: USD {kurz_USD} , EUR {kurz_EUR}")
 
 ####    parsing CSV do PD tab  ####
 def parse_column(col):
-    """CSV parse"""
+    """ CSV FIO parse """
     error = 0
     data=oo.dropna(subset=["Symbol"],axis=0,how="any")    # only valid line
     data=data.dropna(axis=1,how="all")                  # drop empty column
@@ -29,6 +29,8 @@ def parse_column(col):
     #print(f"[DEBUG] col = {repr(col)} type={type(col)}")
     if col=="":
         data = data.loc[(data["Směr"].isna()) | (data["Směr"] == "")] # use only for col
+    # ~ je negace / str.contains("ADR") najde všchny obsahující "ADR"/ na=False - NaN = "neobsahuje ADR"
+        data = data[~data["Text FIO"].str.contains("ADR", na=False)]
     else:
         data=data.loc[data["Směr"]==col]
 
@@ -38,7 +40,7 @@ def parse_column(col):
         errors="coerce"           # neparsovatelné hodnoty -> NaT (něco jako NaN pro datum)
     )
     #conversion to number
-    cols = ["Cena", "Počet", "Objem v CZK","Poplatky v CZK","Objem v USD","Poplatky v USD","Objem v EUR","Poplatky v EUR"]
+    cols = ["Cena","Počet","Objem v CZK","Poplatky v CZK","Objem v USD","Poplatky v USD","Objem v EUR","Poplatky v EUR"]
 
     for cmn in cols:
         data[cmn] = (
@@ -68,15 +70,57 @@ def column_sum(pdt):
     return pdt
 ###########################
 
-with open("Obchody.csv", "r") as fin, open("fio.csv", "w") as fout:
-    for line in fin:
-        if not found and line.lstrip().startswith("Datum obchodu"):
-            found = True
+####    parsing CSV do PD tab  ####
+def parse_column_ib(col):
+    """ CSV IBKR parse """
+    error = 0
+    data=oo.dropna(subset=["Symbol"],axis=0,how="any")    # only valid line
+    data=data.dropna(axis=1,how="all")                  # drop empty column
+    data=data.drop(["Transaction History","Header","Transaction Fees"],axis=1) # drop unused column
+    #print(f"[DEBUG] col = {repr(col)} type={type(col)}")
+    #data = data[~data["Description"].str.contains("ADR", na=False)]
+    data=data.loc[data["Transaction Type"]==col]
 
-        if found:
+    data["Date"] = pd.to_datetime(
+        data["Date"],
+        #format="%d.%m.%Y %H:%M",  # přesný formát "24.11.2025 17:24"
+        errors="coerce"           # neparsovatelné hodnoty -> NaT (něco jako NaN pro datum)
+    )
+    #conversion to number
+    cols = ["Quantity","Price","Gross Amount ","Commission","Net Amount","Exchange Rate"]
+
+    for cmn in cols:
+        data[cmn] = data[cmn].replace("-", np.nan)  # remove - before convert to float
+        data[cmn] = (
+            data[cmn]
+            .astype(str)
+            #.str.replace("-", "", regex=False)
+            .str.replace("\u00A0", "", regex=False)  # NBSP
+            .str.replace("\u202F", "", regex=False)  # thin NBSP
+            .str.replace(" ", "", regex=False)       # běžná mezera
+            .astype(float)
+        )
+        data[cmn] = data[cmn].fillna(0)                 # NaN to 0
+        if (data[cmn].isna().sum())>0:
+            print(data[cmn].isna().sum(), "non parsed values") # 0 = OK
+            error=error+1
+
+    print("PARSE ERRORS = ",error)
+    return data
+#################################################################
+
+if not os.path.exists("Obchody.csv"):
+    print("Soubor Obchody.csv nebyl nalezen! Zpracování bude přeskočeno.")
+else:
+    with open("Obchody.csv", "r", encoding='ANSI') as fin, open("fio.csv", "w", encoding='ANSI') as fout:
+        for line in fin:
+            if not found and line.lstrip().startswith("Datum obchodu"):
+                found = True
+
+            if found:
             # Nahradit středníky čárkami
             #line = line.replace(";", ",")          #not needed
-            fout.write(line)
+                fout.write(line)
 
 oo = pd.read_csv('fio.csv',sep=';',encoding='ANSI') # with semicolon
 
@@ -85,7 +129,7 @@ sell=parse_column("Prodej")
 buy=parse_column("Nákup")
 #buy.info()
 divi=parse_column("")
-debug=divi
+#debug=divi
 #divi.info()
 
 
@@ -103,7 +147,10 @@ divi=column_sum(divi)
 divi["Typ"] = divi[cols_for_divi].lt(0).any(axis=1).map({True: "-daň-", False: "D"})
 divi = divi.groupby(["Symbol","Měna","Typ"], as_index=False)[cols_for_divi].sum()
 
-print(divi)
+divi_sum = divi.groupby(["Měna","Typ"], as_index=False)[cols_for_divi].sum()
+divi_sum = divi_sum[~divi_sum["Měna"].str.contains("CZK", na=False)]
+
+#print(divi_sum)
 
 with pd.ExcelWriter("fio.xlsx", engine="xlsxwriter") as writer:
     # První tabulka
@@ -112,7 +159,7 @@ with pd.ExcelWriter("fio.xlsx", engine="xlsxwriter") as writer:
     fmt_default   = writer.book.add_format({"num_format": '#,##0.00'})
     # Nadpis mezi tabulkami
     worksheet = writer.sheets["Report"]
-    worksheet.write(0, 0, "Výpis prodej - poplatky prodeje započteny již v sloupcích Objem")
+    worksheet.write(0, 0, "Výpis prodej - poplatky prodeje započteny již v sloupcích Objem v XXX")
 
     # Najdi indexy sloupců a nastav formáty na celý sloupec
     colsx = {name: idx for idx, name in enumerate(sell.columns)}
@@ -130,9 +177,36 @@ with pd.ExcelWriter("fio.xlsx", engine="xlsxwriter") as writer:
     worksheet.write(start2, 0, "DIVIDENDY ")
     divi.to_excel(writer, sheet_name="Report", index=False, startrow=start2+1)
 
+    start2 = start2 + len(divi)+3
+    worksheet.write(start2, 0, "SUMA to CZK (bez CZ dividendy) ")
+    divi_sum.to_excel(writer, sheet_name="Report", index=False, startrow=start2+1)
+######################  IBKR #################################
+
+found=0         # pylint: disable=invalid-name
+if not os.path.exists("IB.csv"):
+    print("Soubor IB.csv nebyl nalezen! Zpracování bude přeskočeno.")
+else:
+    with open("IB.csv", "r",encoding="utf-8-sig", newline="") as fin, open("IB_tmp.csv", "w",encoding="utf-8-sig", newline="") as fout:
+        for line in fin:
+            if not found and line.lstrip().startswith("Transaction History"):
+                found = True
+
+            if found:
+            #line = line.replace(";", ",")          #not needed
+                fout.write(line)
+
+oo = pd.read_csv('IB_tmp.csv',sep=',',encoding='utf-8-sig') # with semicolon,
+sell=parse_column_ib("Sell")
+buy =parse_column_ib("Buy")
+divi=parse_column_ib("Dividend")
+divi_t=parse_column_ib("Foreign Tax Withholding")
+debug=divi_t
+
+
+
 
 print("_____________NumPy_____________")
-###########################################################
+######################### DEBUG ###############################
 pole = debug.to_numpy()
 #pole2=buy.to_numpy()
 with open('output.txt', 'w', encoding="utf-8") as outfile:
@@ -149,5 +223,3 @@ print("_______________________________")
 # Výsledek: dvojice (unikátní_hodnota, součet)
 #for u, s in zip(uniq, sums):
    # print(u, s)
-
-
