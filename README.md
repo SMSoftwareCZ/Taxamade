@@ -20,11 +20,14 @@ a přípravu výstupů pro další zpracování (např. účetnictví, reporting
 
 1. Umístěte CSV soubor z brokera do pracovního adresáře.
 2. pro FIO je defaultni nazev Obchody.csv
-3. Spusťte skript:
+3. Nainstalujte použité knihovny
+
+```bash
+pip install pandas numpy xlsxwriter
+```
+
+4. Spusťte skript:
 
 ```bash
 python taxamade.py
-
-Preconditions:
-- Pandas, XlsxWriter
-" python -m pip install XlsxWriter "
+```
