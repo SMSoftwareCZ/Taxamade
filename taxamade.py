@@ -83,7 +83,7 @@ def parse_column_ib(col):
 
     data["Date"] = pd.to_datetime(
         data["Date"],
-        format="%d.%m.%Y %H:%M",  # přesný formát "24.11.2025 17:24"
+        #format="%d.%m.%Y %H:%M",  # přesný formát "24.11.2025 17:24"
         errors="coerce"           # neparsovatelné hodnoty -> NaT (něco jako NaN pro datum)
     )
     #conversion to number
@@ -109,9 +109,6 @@ def parse_column_ib(col):
         #vytvoř sloupec s hodnocením kladné / záporné složky pro grouping
     data["Currency"] = data["Exchange Rate"].astype(float).gt(1).map({True: "EUR", False: "USD"})    
 
-    mask = data["Currency"] == "EUR"
- 
-    data["Price"] = data["Price"] / data["Exchange Rate"]
     data["Gross Amount "] = data["Gross Amount "] / data["Exchange Rate"]
     data["Commission"] = data["Commission"] / data["Exchange Rate"]
     data["Net Amount"] = data["Net Amount"] / data["Exchange Rate"]
@@ -209,14 +206,27 @@ else:
 oo = pd.read_csv('IB_tmp.csv',sep=',',encoding='utf-8-sig') # with semicolon,
 sell=parse_column_ib("Sell")
 buy =parse_column_ib("Buy")
+assign = parse_column_ib("Assignment")
+pro buy je špatně EUR???
+debug=buy
+# Filtry (bez nul)
+sell_new = assign.loc[assign["Quantity"] < 0].copy()
+buy_new  = assign.loc[assign["Quantity"] > 0].copy()
+
+# Přidání (append) do existujících tabulek
+sell = pd.concat([sell, sell_new], ignore_index=True)
+buy  = pd.concat([buy,  buy_new],  ignore_index=True)
+
+
 divi=parse_column_ib("Dividend")
 divi_t=parse_column_ib("Foreign Tax Withholding")
-debug=divi_t
+
+debug=buy
 
 
 cols_sum = ["Quantity","Price","Gross Amount ","Commission","Net Amount"]
 # groupby nad 2. sloupcem a součet sloupce v def poli
-options= sell[sell["Symbol"].str.len() >= 6].groupby(["Currency","Symbol"], as_index=False)[cols_sum].sum()
+options= sell[sell["Symbol"].str.len() >= 6]#.groupby(["Currency","Symbol"], as_index=False)[cols_sum].sum()
 sell = sell[sell["Symbol"].str.len() < 6].groupby(["Currency","Symbol"], as_index=False)[cols_sum].sum()
 buy =  buy.groupby(["Currency","Symbol"], as_index=False)[cols_sum].sum()
 divi = divi.groupby(["Currency","Symbol"], as_index=False)[cols_sum].sum()
@@ -224,23 +234,19 @@ divi_t = divi_t.groupby(["Currency","Symbol"], as_index=False)[cols_sum].sum()
 
 
 with pd.ExcelWriter("IBKR.xlsx", engine="xlsxwriter") as writer:
+    
     # První tabulka
+ 
     sell.to_excel(writer, sheet_name="Report", index=False, startrow=2)
-
-    fmt_default   = writer.book.add_format({"num_format": '#,##0.00'})
-    # Nadpis mezi tabulkami
+    
     worksheet = writer.sheets["Report"]
     worksheet.write(0, 0, "Výpis prodej         -    (USD)EXCHANGE RATE není celé číslo >> EUR")
-
-    # Najdi indexy sloupců a nastav formáty na celý sloupec
-    colsx = {name: idx for idx, name in enumerate(sell.columns)}
-    for name in cols_to_sum:
-        if name in colsx:
-            colx = colsx[name]
-            worksheet.set_column(colx, colx, 12, fmt_default)
-
+    start2 = len(sell)+4
+    worksheet.write(start2, 0, "Výpis Assignment - informativní zahrnuto v nákup/prodej")
+    assign.to_excel(writer, sheet_name="Report", index=False, startrow=start2+1)
+    
     # Druhá tabulka pod první (např.  df1 má 100 řádků)
-    start2 = len(sell) + 6
+    start2 = start2+len(assign) + 4
     worksheet.write(start2, 0, "Výpis nákup - informativní - aktuální rok")
     buy.to_excel(writer, sheet_name="Report", index=False, startrow=start2+1)
 
@@ -255,6 +261,17 @@ with pd.ExcelWriter("IBKR.xlsx", engine="xlsxwriter") as writer:
     start2 = start2 + len(divi)+3
     worksheet.write(start2, 0, " TAX ")
     divi_t.to_excel(writer, sheet_name="Report", index=False, startrow=start2+1)
+
+    fmt_default   = writer.book.add_format({"num_format": '#,##0.00'})
+  
+    
+
+    # Najdi indexy sloupců a nastav formáty na celý sloupec
+    colsx = {name: idx for idx, name in enumerate(sell.columns)}
+    for name in cols_to_sum:
+        if name in colsx:
+            colx = colsx[name]
+            worksheet.set_column(colx, colx, 12, fmt_default)
 
 print("_____________NumPy_____________")
 ######################### DEBUG ###############################
