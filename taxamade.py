@@ -87,7 +87,7 @@ def parse_column_ib(col):
         errors="coerce"           # neparsovatelné hodnoty -> NaT (něco jako NaN pro datum)
     )
     #conversion to number
-    cols = ["Quantity","Price","Gross Amount ","Commission","Net Amount","Exchange Rate"]
+    cols = ["Quantity","Price","Gross Amount","Commission","Net Amount","Exchange Rate"]
 
     for cmn in cols:
         data[cmn] = data[cmn].replace("-", np.nan)  # remove - before convert to float
@@ -109,12 +109,21 @@ def parse_column_ib(col):
         #vytvoř sloupec s hodnocením kladné / záporné složky pro grouping
     data["Currency"] = data["Exchange Rate"].astype(float).gt(1).map({True: "EUR", False: "USD"})    
 
-    data["Gross Amount "] = data["Gross Amount "] / data["Exchange Rate"]
+    data["Gross Amount"] = data["Gross Amount"] / data["Exchange Rate"]
     data["Commission"] = data["Commission"] / data["Exchange Rate"]
     data["Net Amount"] = data["Net Amount"] / data["Exchange Rate"]
 
     print("PARSE ERRORS = ",error)
     return data
+################ FORMAT XLS ######################
+def format_sheet_columns(ws, df, cols_sum, fmt):
+    # mapa jména -> excel sloupec
+    index_map = {name: idx for idx, name in enumerate(df.columns)}
+
+    for col in cols_sum:
+        if col in index_map:
+            c = index_map[col]
+            ws.set_column(c, c, 12, fmt)
 #################################################################
 
 if not os.path.exists("Obchody.csv"):
@@ -137,17 +146,17 @@ sell=parse_column("Prodej")
 buy=parse_column("Nákup")
 #buy.info()
 divi=parse_column("")
-#debug=divi
-#divi.info()
 
 
 cols_to_sum = ["Počet","Objem v CZK", "Poplatky v CZK","Objem v USD","Poplatky v USD","Objem v EUR","Poplatky v EUR"]
 # groupby nad 2. sloupcem a součet sloupce v def poli
-out = sell.groupby(["Symbol","Měna"], as_index=False)[cols_to_sum].sum()
-sell=column_sum(out)
+#out = sell.groupby(["Symbol","Měna"], as_index=False)[cols_to_sum].sum()
+sell=column_sum(sell)
 
-out = buy.groupby(["Symbol","Měna"], as_index=False)[cols_to_sum].sum()
-buy=column_sum(out)
+#out = buy.groupby(["Symbol","Měna"], as_index=False)[cols_to_sum].sum()
+buy=column_sum(buy)
+sell = sell.sort_values(by="Datum obchodu")
+buy = buy.sort_values(by="Datum obchodu")
 
 cols_for_divi = ["Objem v CZK", "Objem v USD","Objem v EUR"]
 divi=column_sum(divi)
@@ -188,7 +197,7 @@ with pd.ExcelWriter("fio.xlsx", engine="xlsxwriter") as writer:
     start2 = start2 + len(divi)+3
     worksheet.write(start2, 0, "SUMA to CZK (bez CZ dividendy) ")
     divi_sum.to_excel(writer, sheet_name="Report", index=False, startrow=start2+1)
-######################  IBKR #################################
+######################  IBKR USD #################################
 
 found=0         # pylint: disable=invalid-name
 if not os.path.exists("IB.csv"):
@@ -204,90 +213,94 @@ else:
                 fout.write(line)
 
 oo = pd.read_csv('IB_tmp.csv',sep=',',encoding='utf-8-sig') # with semicolon,
+oo.columns = oo.columns.str.strip() # uprava nazvu sloupců
 sell=parse_column_ib("Sell")
 buy =parse_column_ib("Buy")
 assign = parse_column_ib("Assignment")
-pro buy je špatně EUR???
-debug=buy
-# Filtry (bez nul)
+# Filtry (bez nul) - z assigment riztřídím dle znaménka BUY/SELL 
 sell_new = assign.loc[assign["Quantity"] < 0].copy()
 buy_new  = assign.loc[assign["Quantity"] > 0].copy()
-
 # Přidání (append) do existujících tabulek
 sell = pd.concat([sell, sell_new], ignore_index=True)
 buy  = pd.concat([buy,  buy_new],  ignore_index=True)
-
-
 divi=parse_column_ib("Dividend")
 divi_t=parse_column_ib("Foreign Tax Withholding")
 
-debug=buy
+#debug=buy
 
 
-cols_sum = ["Quantity","Price","Gross Amount ","Commission","Net Amount"]
+cols_sum = ["Quantity","Price","Gross Amount","Commission","Net Amount"]
 # groupby nad 2. sloupcem a součet sloupce v def poli
-options= sell[sell["Symbol"].str.len() >= 6]#.groupby(["Currency","Symbol"], as_index=False)[cols_sum].sum()
-sell = sell[sell["Symbol"].str.len() < 6].groupby(["Currency","Symbol"], as_index=False)[cols_sum].sum()
-buy =  buy.groupby(["Currency","Symbol"], as_index=False)[cols_sum].sum()
+options_s = sell[sell["Symbol"].str.len() >= 6]
+options_b = buy[buy["Symbol"].str.len() >= 6]
+options_s = options_s.sort_values(by=["Currency","Date"])
+options_b = options_b.sort_values(by=["Currency","Date"])
+#options = options.groupby(["Date","Currency","Symbol"], as_index=False)[cols_sum].sum()
+sell = sell[sell["Symbol"].str.len() < 6]##.groupby(["Currency","Symbol"], as_index=False)[cols_sum].sum()
+sell = sell.sort_values(by="Date")
+buy = buy.sort_values(by="Date")
+##buy.groupby(["Currency","Symbol","Price"], as_index=False)[cols_sum].sum()
 divi = divi.groupby(["Currency","Symbol"], as_index=False)[cols_sum].sum()
+# zaplacená daň
 divi_t = divi_t.groupby(["Currency","Symbol"], as_index=False)[cols_sum].sum()
 
 
-with pd.ExcelWriter("IBKR.xlsx", engine="xlsxwriter") as writer:
-    
-    # První tabulka
- 
-    sell.to_excel(writer, sheet_name="Report", index=False, startrow=2)
-    
-    worksheet = writer.sheets["Report"]
-    worksheet.write(0, 0, "Výpis prodej         -    (USD)EXCHANGE RATE není celé číslo >> EUR")
-    start2 = len(sell)+4
-    worksheet.write(start2, 0, "Výpis Assignment - informativní zahrnuto v nákup/prodej")
-    assign.to_excel(writer, sheet_name="Report", index=False, startrow=start2+1)
-    
-    # Druhá tabulka pod první (např.  df1 má 100 řádků)
-    start2 = start2+len(assign) + 4
-    worksheet.write(start2, 0, "Výpis nákup - informativní - aktuální rok")
-    buy.to_excel(writer, sheet_name="Report", index=False, startrow=start2+1)
+with pd.ExcelWriter("IBKR.xlsx", engine="xlsxwriter") as writer_2:
 
-    start2 = start2 + len(buy) + 4
-    worksheet.write(start2, 0, "OPCE ")
-    options.to_excel(writer, sheet_name="Report", index=False, startrow=start2+1)
+    # Formát (pokud chceš aplikovat)
+    fmt_default2 = writer_2.book.add_format({"num_format": '#,##0.00'})
+    # --- LIST: PRODEJ ---
+    sell.to_excel(writer_2, sheet_name="Prodej", index=False, startrow=2,float_format="%.2f")
+    ws_prodej = writer_2.sheets["Prodej"]
+    # Nadpis 1
+    ws_prodej.write(0, 0, "Výpis prodej - (USD)EXCHANGE RATE není celé číslo >> EUR")
 
-    start2 = start2 + len(options) + 4
-    worksheet.write(start2, 0, "DIVIDENDY ")
-    divi.to_excel(writer, sheet_name="Report", index=False, startrow=start2+1)
+    # Druhá tabulka – Assignment
+    start = len(sell) + 4
+    ws_prodej.write(start, 0, "Výpis Assignment - informativní zahrnuto v nákup/prodej")
+    assign.to_excel(writer_2, sheet_name="Prodej", index=False, startrow=start + 1,float_format="%.2f")
 
-    start2 = start2 + len(divi)+3
-    worksheet.write(start2, 0, " TAX ")
-    divi_t.to_excel(writer, sheet_name="Report", index=False, startrow=start2+1)
+    # Třetí tabulka – Buy
+    start = start + len(assign) + 4
+    ws_prodej.write(start, 0, "Výpis nákup - informativní - aktuální rok")
+    buy.to_excel(writer_2, sheet_name="Prodej", index=False, startrow=start + 1,float_format="%.2f")
 
-    fmt_default   = writer.book.add_format({"num_format": '#,##0.00'})
+    format_sheet_columns(ws_prodej, sell, cols_sum, fmt_default2)
+    format_sheet_columns(ws_prodej, assign, cols_sum, fmt_default2)
+    format_sheet_columns(ws_prodej, buy, cols_sum, fmt_default2)
+
+    # --- LIST: OPCE ---
   
-    
+    start = 0
+    options_b.to_excel(writer_2, sheet_name="Opce", index=False, startrow=start + 1,float_format="%.2f")
+    ws_opce = writer_2.sheets["Opce"]
+    ws_opce.write(start, 0, "OPCE - BUY")
 
-    # Najdi indexy sloupců a nastav formáty na celý sloupec
-    colsx = {name: idx for idx, name in enumerate(sell.columns)}
-    for name in cols_to_sum:
-        if name in colsx:
-            colx = colsx[name]
-            worksheet.set_column(colx, colx, 12, fmt_default)
+    start = start + len(options_b) + 3
+    ws_opce.write(start, 0, "OPCE - SELL")
+    options_s.to_excel(writer_2, sheet_name="Opce", index=False, startrow=start + 1,float_format="%.2f")
+
+    format_sheet_columns(ws_opce, options_b, cols_sum, fmt_default2)
+    format_sheet_columns(ws_opce, options_s, cols_sum, fmt_default2)
+    # --- LIST: DIVIDENDY ---
+  
+    start = 0
+    divi.to_excel(writer_2, sheet_name="Divi", index=False, startrow=start + 1,float_format="%.2f")
+    ws_divi = writer_2.sheets["Divi"]
+    ws_divi.write(start, 0, "DIVIDENDY")
+
+    start = start + len(divi) + 3
+    ws_divi.write(start, 0, "TAX")
+    divi_t.to_excel(writer_2, sheet_name="Divi", index=False, startrow=start + 1,float_format="%.2f")
+
+    format_sheet_columns(ws_divi, divi, cols_sum, fmt_default2)
+    format_sheet_columns(ws_divi, divi_t, cols_sum, fmt_default2)
+
+
 
 print("_____________NumPy_____________")
 ######################### DEBUG ###############################
-pole = debug.to_numpy()
-#pole2=buy.to_numpy()
-with open('output.txt', 'w', encoding="utf-8") as outfile:
-    outfile.write(str(pole))
-
-#uniq, inv = np.unique(pole[:,2], return_inverse=True)
-# 3) Sečteme 3. sloupec podle skupin v 2. sloupci
-#sums = np.zeros(len(uniq), dtype=float)
-#np.add.at(sums, inv, pole[:, 3])
-
-#print(uniq,inv,sums)
-
-print("_______________________________")
-# Výsledek: dvojice (unikátní_hodnota, součet)
-#for u, s in zip(uniq, sums):
-   # print(u, s)
+if 'debug' in locals() or 'debug' in globals():
+    pole = debug.to_numpy()
+    with open('output.txt', 'w', encoding="utf-8") as outfile:
+        outfile.write(str(pole))
