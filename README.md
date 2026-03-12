@@ -1,7 +1,7 @@
 # Taxamade
 
 **Taxamade** je Python skript určený pro snadné a spolehlivé parsování CSV souborů
-získaných jako výstup od brokerů. Projekt automatizuje čištění dat, převody formátů
+získaných jako výstup od brokerů FIO a IBKR. Projekt automatizuje čištění dat, převody formátů
 a přípravu výstupů pro další zpracování (např. účetnictví, reporting nebo daňové podklady).
 
 ---
@@ -20,6 +20,7 @@ a přípravu výstupů pro další zpracování (např. účetnictví, reporting
 
 1. Umístěte CSV soubor z brokera do pracovního adresáře.
 2. pro FIO je defaultni nazev Obchody.csv
+3. pro IBKR je to IB.csv (transakční hystorie v USD)
 3. Nainstalujte použité knihovny
 
 ```bash

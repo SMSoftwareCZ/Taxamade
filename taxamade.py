@@ -3,7 +3,7 @@
 import os
 import numpy as np
 import pandas as pd
-#import matplotlib.pyplot as plt
+
 
 print("----INFO----")
 print("numpy - ",np.__version__)
@@ -108,7 +108,6 @@ def parse_column_ib(col):
         # Převod na EUR
         #vytvoř sloupec s hodnocením kladné / záporné složky pro grouping
     data["Currency"] = data["Exchange Rate"].astype(float).gt(1).map({True: "EUR", False: "USD"})    
-
     data["Gross Amount"] = data["Gross Amount"] / data["Exchange Rate"]
     data["Commission"] = data["Commission"] / data["Exchange Rate"]
     data["Net Amount"] = data["Net Amount"] / data["Exchange Rate"]
@@ -116,18 +115,17 @@ def parse_column_ib(col):
     print("PARSE ERRORS = ",error)
     return data
 ################ FORMAT XLS ######################
-def format_sheet_columns(ws, df, cols_sum, fmt):
+def format_sheet_columns(ws, df, cols_fmt, fmt):
     # mapa jména -> excel sloupec
     index_map = {name: idx for idx, name in enumerate(df.columns)}
 
-    for col in cols_sum:
+    for col in cols_fmt:
         if col in index_map:
             c = index_map[col]
             ws.set_column(c, c, 12, fmt)
-#################################################################
 
 if not os.path.exists("Obchody.csv"):
-    print("Soubor Obchody.csv nebyl nalezen! Zpracování bude přeskočeno.")
+    raise FileNotFoundError("Soubor Obchody.csv nebyl nalezen!")
 else:
     with open("Obchody.csv", "r", encoding='ANSI') as fin, open("fio.csv", "w", encoding='ANSI') as fout:
         for line in fin:
@@ -177,31 +175,29 @@ with pd.ExcelWriter("fio.xlsx", engine="xlsxwriter") as writer:
     # Nadpis mezi tabulkami
     worksheet = writer.sheets["Report"]
     worksheet.write(0, 0, "Výpis prodej - poplatky prodeje započteny již v sloupcích Objem v XXX")
-
-    # Najdi indexy sloupců a nastav formáty na celý sloupec
-    colsx = {name: idx for idx, name in enumerate(sell.columns)}
-    for name in cols_to_sum:
-        if name in colsx:
-            colx = colsx[name]
-            worksheet.set_column(colx, colx, 12, fmt_default)
+    format_sheet_columns(worksheet, sell, cols_to_sum, fmt_default)
 
     # Druhá tabulka pod první (např.  df1 má 100 řádků)
     start2 = len(sell) + 6
     worksheet.write(start2, 0, "Výpis nákup - informativní - aktuální rok")
     buy.to_excel(writer, sheet_name="Report", index=False, startrow=start2+1)
+    format_sheet_columns(worksheet, buy, cols_to_sum, fmt_default)
 
     start2 = start2 + len(buy) + 4
     worksheet.write(start2, 0, "DIVIDENDY ")
     divi.to_excel(writer, sheet_name="Report", index=False, startrow=start2+1)
+    format_sheet_columns(worksheet, divi, cols_to_sum, fmt_default)
 
     start2 = start2 + len(divi)+3
     worksheet.write(start2, 0, "SUMA to CZK (bez CZ dividendy) ")
     divi_sum.to_excel(writer, sheet_name="Report", index=False, startrow=start2+1)
+    format_sheet_columns(worksheet, divi_sum, cols_to_sum, fmt_default)
+
 ######################  IBKR USD #################################
 
 found=0         # pylint: disable=invalid-name
 if not os.path.exists("IB.csv"):
-    print("Soubor IB.csv nebyl nalezen! Zpracování bude přeskočeno.")
+    raise FileNotFoundError("Soubor IB.csv nebyl nalezen!")
 else:
     with open("IB.csv", "r",encoding="utf-8-sig", newline="") as fin, open("IB_tmp.csv", "w",encoding="utf-8-sig", newline="") as fout:
         for line in fin:
